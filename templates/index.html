@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brain Tumor MRI Classifier</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    :root {
+      --bg: #0a0f1c;
+      --panel: #111a2e;
+      --panel-edge: #22304d;
+      --scan: #5be8d1;
+      --scan-dim: #5be8d133;
+      --text: #e7ecf7;
+      --muted: #7d8bab;
+      --alert: #ff6b6b;
+      --alert-bg: #2a1418;
+      --ok-bg: #0f2a24;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      font-family: 'Space Grotesk', Arial, sans-serif;
+      background:
+        radial-gradient(circle at 20% -10%, #16244080 0%, transparent 55%),
+        radial-gradient(circle at 100% 110%, #0e2b2680 0%, transparent 50%),
+        var(--bg);
+      color: var(--text);
+    }
+
+    main {
+      position: relative;
+      width: min(100%, 560px);
+      padding: 40px;
+      background: linear-gradient(180deg, var(--panel), #0d1526);
+      border: 1px solid var(--panel-edge);
+      border-radius: 16px;
+      box-shadow: 0 20px 60px #00000066, inset 0 1px 0 #ffffff0a;
+      overflow: hidden;
+    }
+
+    /* faint corner reticle, like a scan viewport */
+    main::before, main::after {
+      content: "";
+      position: absolute;
+      width: 22px; height: 22px;
+      border: 1px solid var(--scan-dim);
+      opacity: .6;
+    }
+    main::before { top: 14px; left: 14px; border-right: none; border-bottom: none; }
+    main::after { bottom: 14px; right: 14px; border-left: none; border-top: none; }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .72rem;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--scan);
+      margin-bottom: 10px;
+    }
+    .eyebrow .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--scan);
+      box-shadow: 0 0 8px 2px var(--scan-dim);
+      animation: pulse 2.2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 1.7rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    p.lede {
+      color: var(--muted);
+      line-height: 1.6;
+      margin: 0 0 26px;
+      font-size: .96rem;
+    }
+
+    form { margin-top: 8px; }
+
+    .dropzone {
+      position: relative;
+      border: 1.5px dashed var(--panel-edge);
+      border-radius: 12px;
+      padding: 30px 20px;
+      text-align: center;
+      cursor: pointer;
+      background: #0b1425;
+      transition: border-color .25s ease, background .25s ease;
+      overflow: hidden;
+    }
+    .dropzone:hover, .dropzone.drag {
+      border-color: var(--scan);
+      background: #0c1a2c;
+    }
+    .dropzone .scanline {
+      position: absolute;
+      left: 0; right: 0; top: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--scan), transparent);
+      opacity: 0;
+      transform: translateY(0);
+    }
+    .dropzone.scanning .scanline {
+      opacity: .9;
+      animation: sweep 1.4s linear infinite;
+    }
+    @keyframes sweep {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(220px); }
+    }
+
+    .dz-icon {
+      width: 40px; height: 40px;
+      margin: 0 auto 14px;
+      color: var(--scan);
+      opacity: .9;
+    }
+
+    .dz-title { font-weight: 600; font-size: .98rem; }
+    .dz-sub {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .74rem;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    .dz-filename {
+      margin-top: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .8rem;
+      color: var(--scan);
+      word-break: break-all;
+    }
+
+    input[type="file"] { display: none; }
+
+    button {
+      width: 100%;
+      margin-top: 20px;
+      padding: 14px;
+      border: 0;
+      border-radius: 9px;
+      background: var(--scan);
+      color: #06231d;
+      font-weight: 700;
+      font-size: .95rem;
+      letter-spacing: .01em;
+      cursor: pointer;
+      transition: transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+      box-shadow: 0 8px 24px #5be8d133;
+    }
+    button:hover { transform: translateY(-1px); box-shadow: 0 12px 28px #5be8d14d; }
+    button:active { transform: translateY(0); }
+    button:disabled { opacity: .55; cursor: progress; transform: none; }
+
+    .preview {
+      width: 100%;
+      max-height: 300px;
+      object-fit: contain;
+      margin-top: 24px;
+      border: 1px solid var(--panel-edge);
+      border-radius: 10px;
+      background: #060b16;
+      filter: grayscale(.15) contrast(1.05);
+    }
+
+    .result-panel {
+      margin-top: 22px;
+      padding: 20px;
+      border-radius: 12px;
+      background: var(--ok-bg);
+      border: 1px solid #1c5a49;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .gauge {
+      position: relative;
+      width: 74px;
+      height: 74px;
+      flex-shrink: 0;
+    }
+    .gauge svg { transform: rotate(-90deg); }
+    .gauge circle {
+      fill: none;
+      stroke-width: 6;
+    }
+    .gauge .track { stroke: #ffffff14; }
+    .gauge .fill {
+      stroke: var(--scan);
+      stroke-linecap: round;
+      transition: stroke-dashoffset 1s cubic-bezier(.4,0,.2,1);
+    }
+    .gauge .pct {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--scan);
+    }
+
+    .result-text .label-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .68rem;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: #4fbfa5;
+      margin-bottom: 4px;
+    }
+    .result-text .value {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+    .result-text .confidence-line {
+      margin-top: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .8rem;
+      color: var(--muted);
+    }
+
+    .message.error {
+      margin-top: 22px;
+      padding: 16px 18px;
+      border-radius: 10px;
+      background: var(--alert-bg);
+      border: 1px solid #6b2530;
+      color: #ff9d9d;
+      font-size: .92rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .message.error::before {
+      content: "!";
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: var(--alert);
+      color: #2a0d0d;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: .8rem;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .eyebrow .dot, .dropzone.scanning .scanline { animation: none; }
+      .gauge .fill { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow"><span class="dot"></span>Diagnostic assist &middot; not for clinical use alone</div>
+    <h1>Brain Tumor MRI Classifier</h1>
+    <p class="lede">Upload an MRI scan and your trained model will predict the tumor class with a confidence score.</p>
+
+    <form method="post" enctype="multipart/form-data" id="predict-form">
+      <label class="dropzone" id="dropzone" for="image">
+        <span class="scanline"></span>
+        <svg class="dz-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 16.5V19a2 2 0 002 2h12a2 2 0 002-2v-2.5M8 8l4-4 4 4M12 4v13" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="dz-title">Drop MRI image or click to browse</div>
+        <div class="dz-sub">PNG · JPEG · BMP · TIFF</div>
+        <div class="dz-filename" id="dz-filename"></div>
+      </label>
+      <input id="image" name="image" type="file" accept="image/png,image/jpeg,image/bmp,image/tiff" required>
+      <button type="submit" id="submit-btn">Predict tumor class</button>
+    </form>
+
+    {% if result %}
+      {% if image_url %}
+        <img class="preview" src="{{ image_url }}" alt="Uploaded MRI used for prediction">
+      {% endif %}
+      <section class="result-panel">
+        <div class="gauge">
+          <svg width="74" height="74" viewBox="0 0 74 74">
+            <circle class="track" cx="37" cy="37" r="31"></circle>
+            <circle class="fill" cx="37" cy="37" r="31"
+              stroke-dasharray="194.8"
+              stroke-dashoffset="{{ 194.8 - (194.8 * (result.confidence | float) / 100) }}"></circle>
+          </svg>
+          <div class="pct">{{ result.confidence }}%</div>
+        </div>
+        <div class="result-text">
+          <div class="label-tag">Prediction</div>
+          <div class="value">{{ result.label }}</div>
+          <div class="confidence-line">Confidence: {{ result.confidence }}%</div>
+        </div>
+      </section>
+    {% endif %}
+
+    {% if error %}
+      <section class="message error">{{ error }}</section>
+    {% endif %}
+  </main>
+
+  <script>
+    const dropzone = document.getElementById('dropzone');
+    const input = document.getElementById('image');
+    const filenameEl = document.getElementById('dz-filename');
+    const form = document.getElementById('predict-form');
+    const btn = document.getElementById('submit-btn');
+
+    function showFile(file) {
+      if (file) {
+        filenameEl.textContent = file.name;
+        dropzone.classList.add('scanning');
+      } else {
+        filenameEl.textContent = '';
+        dropzone.classList.remove('scanning');
+      }
+    }
+
+    input.addEventListener('change', () => showFile(input.files[0]));
+
+    ['dragenter', 'dragover'].forEach(evt =>
+      dropzone.addEventListener(evt, e => {
+        e.preventDefault();
+        dropzone.classList.add('drag');
+      })
+    );
+    ['dragleave', 'drop'].forEach(evt =>
+      dropzone.addEventListener(evt, e => {
+        e.preventDefault();
+        dropzone.classList.remove('drag');
+      })
+    );
+    dropzone.addEventListener('drop', e => {
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        input.files = e.dataTransfer.files;
+        showFile(file);
+      }
+    });
+
+    form.addEventListener('submit', () => {
+      btn.disabled = true;
+      btn.textContent = 'Analyzing scan…';
+    });
+  </script>
+</body>
+</html>
