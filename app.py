@@ -6,7 +6,9 @@ import cv2
 import joblib
 import numpy as np
 import requests
+
 from flask import Flask, render_template, request
+
 from skimage.feature import (
     graycomatrix,
     graycoprops,
@@ -14,7 +16,28 @@ from skimage.feature import (
     local_binary_pattern,
 )
 
+
+# =========================================================
+# BASE DIRECTORY
+# =========================================================
+
 BASE_DIR = Path(__file__).resolve().parent
+
+
+# =========================================================
+# FLASK APPLICATION
+# IMPORTANT: Vercel looks for this top-level "app" object
+# =========================================================
+
+app = Flask(__name__)
+
+# Maximum upload size = 8 MB
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
+
+
+# =========================================================
+# MODEL FILES
+# =========================================================
 
 MODEL_FILES = {
     "model": BASE_DIR / "Best_BrainTumor_Model.pkl",
@@ -22,10 +45,20 @@ MODEL_FILES = {
     "encoder": BASE_DIR / "LabelEncoder.pkl",
 }
 
+
+# =========================================================
+# HUGGING FACE MODEL LOCATION
+# =========================================================
+
 BASE_URL = (
     "https://huggingface.co/poojasank/"
     "BrainTumorModel/resolve/main"
 )
+
+
+# =========================================================
+# ALLOWED IMAGE EXTENSIONS
+# =========================================================
 
 ALLOWED_EXTENSIONS = {
     "png",
@@ -36,27 +69,30 @@ ALLOWED_EXTENSIONS = {
     "tiff",
 }
 
-app = Flask(__name__)
 
-# Maximum uploaded image size: 8 MB
-app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
+# =========================================================
+# DOWNLOAD MODEL FILES
+# =========================================================
 
-
-# ---------------------------------------------------------
-# Download model files from Hugging Face
-# ---------------------------------------------------------
 def download_model_files():
-    """Download model files from Hugging Face if they don't exist."""
+    """
+    Download model files from Hugging Face
+    if they are not already available locally.
+    """
 
     for name, path in MODEL_FILES.items():
 
         if path.exists():
-            print(f"{path.name} already exists.")
+            print(
+                f"{path.name} already exists."
+            )
             continue
 
         url = f"{BASE_URL}/{path.name}"
 
-        print(f"Downloading: {url}")
+        print(
+            f"Downloading model file: {url}"
+        )
 
         response = requests.get(
             url,
@@ -65,43 +101,68 @@ def download_model_files():
 
         response.raise_for_status()
 
-        with open(path, "wb") as f:
-            f.write(response.content)
+        with open(path, "wb") as file:
+            file.write(response.content)
 
         print(
-            f"Downloaded {path.name} "
-            f"({path.stat().st_size} bytes)"
+            f"Downloaded {path.name}"
+        )
+
+        print(
+            f"File size: "
+            f"{path.stat().st_size} bytes"
         )
 
 
-# ---------------------------------------------------------
-# Check allowed image extensions
-# ---------------------------------------------------------
+# =========================================================
+# CHECK FILE EXTENSION
+# =========================================================
+
 def allowed_file(filename):
+
     return (
         "." in filename
-        and filename.rsplit(".", 1)[1].lower()
+        and filename.rsplit(
+            ".",
+            1
+        )[1].lower()
         in ALLOWED_EXTENSIONS
     )
 
 
-# ---------------------------------------------------------
-# Extract features directly from image
-# ---------------------------------------------------------
+# =========================================================
+# FEATURE EXTRACTION
+# =========================================================
+
 def extract_features(image):
 
     if image is None:
-        raise ValueError("Uploaded image is invalid.")
+        raise ValueError(
+            "Uploaded image is invalid."
+        )
 
-    # Resize and convert to grayscale
-    gray = cv2.cvtColor(
-        cv2.resize(image, (128, 128)),
-        cv2.COLOR_BGR2GRAY
+    # -----------------------------------------------------
+    # Resize image
+    # -----------------------------------------------------
+
+    resized_image = cv2.resize(
+        image,
+        (128, 128)
     )
 
     # -----------------------------------------------------
-    # HOG Features
+    # Convert to grayscale
     # -----------------------------------------------------
+
+    gray = cv2.cvtColor(
+        resized_image,
+        cv2.COLOR_BGR2GRAY
+    )
+
+    # =====================================================
+    # HOG FEATURES
+    # =====================================================
+
     hog_features = hog(
         gray,
         orientations=9,
@@ -111,10 +172,12 @@ def extract_features(image):
         feature_vector=True,
     )
 
-    # -----------------------------------------------------
-    # LBP Features
-    # -----------------------------------------------------
+    # =====================================================
+    # LBP FEATURES
+    # =====================================================
+
     radius = 2
+
     n_points = 8 * radius
 
     lbp = local_binary_pattern(
@@ -126,19 +189,29 @@ def extract_features(image):
 
     lbp_features, _ = np.histogram(
         lbp.ravel(),
-        bins=np.arange(0, n_points + 3),
-        range=(0, n_points + 2),
+        bins=np.arange(
+            0,
+            n_points + 3
+        ),
+        range=(
+            0,
+            n_points + 2
+        ),
     )
 
-    lbp_features = lbp_features.astype(float)
+    lbp_features = (
+        lbp_features.astype(float)
+    )
 
     lbp_features /= (
-        lbp_features.sum() + 1e-7
+        lbp_features.sum()
+        + 1e-7
     )
 
-    # -----------------------------------------------------
-    # GLCM Features
-    # -----------------------------------------------------
+    # =====================================================
+    # GLCM FEATURES
+    # =====================================================
+
     glcm = graycomatrix(
         gray,
         distances=[1],
@@ -182,9 +255,10 @@ def extract_features(image):
         ]
     )
 
-    # -----------------------------------------------------
-    # Combine all features
-    # -----------------------------------------------------
+    # =====================================================
+    # COMBINE FEATURES
+    # =====================================================
+
     features = np.concatenate(
         [
             hog_features,
@@ -193,32 +267,57 @@ def extract_features(image):
         ]
     )
 
-    return features.reshape(1, -1)
+    return features.reshape(
+        1,
+        -1
+    )
 
 
-# ---------------------------------------------------------
-# Load ML model, scaler and encoder
-# ---------------------------------------------------------
+# =========================================================
+# LOAD MODEL / SCALER / ENCODER
+# =========================================================
+
 @lru_cache(maxsize=1)
 def load_artifacts():
 
-    print("Checking model files...")
+    print(
+        "Checking model files..."
+    )
 
+    # Download model files if required
     download_model_files()
 
-    print("Loading model...")
+    # -----------------------------------------------------
+    # Load ML model
+    # -----------------------------------------------------
+
+    print(
+        "Loading model..."
+    )
 
     model = joblib.load(
         MODEL_FILES["model"]
     )
 
-    print("Loading scaler...")
+    # -----------------------------------------------------
+    # Load scaler
+    # -----------------------------------------------------
+
+    print(
+        "Loading scaler..."
+    )
 
     scaler = joblib.load(
         MODEL_FILES["scaler"]
     )
 
-    print("Loading encoder...")
+    # -----------------------------------------------------
+    # Load label encoder
+    # -----------------------------------------------------
+
+    print(
+        "Loading encoder..."
+    )
 
     encoder = joblib.load(
         MODEL_FILES["encoder"]
@@ -228,43 +327,86 @@ def load_artifacts():
         "All model files loaded successfully."
     )
 
-    return model, scaler, encoder
+    return (
+        model,
+        scaler,
+        encoder
+    )
 
 
-# ---------------------------------------------------------
-# Home / Prediction page
-# ---------------------------------------------------------
-@app.route("/", methods=["GET", "POST"])
+# =========================================================
+# HOME PAGE + PREDICTION
+# =========================================================
+
+@app.route(
+    "/",
+    methods=["GET", "POST"]
+)
 def index():
 
     result = None
+
     error = None
 
     if request.method == "POST":
 
-        # IMPORTANT:
-        # Your HTML form uses name="image"
-        upload = request.files.get("image")
+        # -------------------------------------------------
+        # Get uploaded image
+        #
+        # Your HTML input must use:
+        #
+        # <input type="file" name="image">
+        # -------------------------------------------------
 
-        if not upload or upload.filename == "":
-            error = "Please choose an MRI image."
+        upload = request.files.get(
+            "image"
+        )
 
-        elif not allowed_file(upload.filename):
+        # -------------------------------------------------
+        # Check whether image was selected
+        # -------------------------------------------------
+
+        if (
+            not upload
+            or upload.filename == ""
+        ):
+
             error = (
-                "Only PNG, JPG, JPEG, BMP, TIFF "
-                "images are allowed."
+                "Please choose an MRI image."
+            )
+
+        # -------------------------------------------------
+        # Check image extension
+        # -------------------------------------------------
+
+        elif not allowed_file(
+            upload.filename
+        ):
+
+            error = (
+                "Only PNG, JPG, JPEG, BMP, "
+                "and TIFF images are allowed."
             )
 
         else:
 
             try:
 
-                # -------------------------------------------------
-                # DO NOT SAVE FILE TO /uploads
+                # =================================================
+                # IMPORTANT FOR VERCEL
                 #
-                # Vercel has a read-only filesystem.
-                # Read uploaded image directly into memory.
-                # -------------------------------------------------
+                # DO NOT USE:
+                #
+                # upload.save(...)
+                #
+                # DO NOT CREATE:
+                #
+                # /uploads
+                #
+                # Vercel filesystem is read-only.
+                #
+                # Read image directly into memory instead.
+                # =================================================
 
                 file_bytes = np.frombuffer(
                     upload.read(),
@@ -276,50 +418,74 @@ def index():
                     cv2.IMREAD_COLOR
                 )
 
+                # -------------------------------------------------
+                # Validate image
+                # -------------------------------------------------
+
                 if image is None:
+
                     raise ValueError(
-                        "Uploaded image could not be decoded."
+                        "Uploaded image could not "
+                        "be decoded."
                     )
 
                 print(
                     "Image decoded successfully."
                 )
 
-                # -------------------------------------------------
-                # Load model
-                # -------------------------------------------------
-                model, scaler, encoder = (
-                    load_artifacts()
-                )
+                # =================================================
+                # LOAD MODEL
+                # =================================================
 
-                # -------------------------------------------------
-                # Extract image features
-                # -------------------------------------------------
+                (
+                    model,
+                    scaler,
+                    encoder
+                ) = load_artifacts()
+
+                # =================================================
+                # EXTRACT FEATURES
+                # =================================================
+
                 features = extract_features(
                     image
                 )
 
-                # -------------------------------------------------
-                # Scale features
-                # -------------------------------------------------
+                print(
+                    "Features extracted successfully."
+                )
+
+                # =================================================
+                # SCALE FEATURES
+                # =================================================
+
                 features = scaler.transform(
                     features
                 )
 
-                # -------------------------------------------------
-                # Prediction
-                # -------------------------------------------------
+                # =================================================
+                # MAKE PREDICTION
+                # =================================================
+
                 prediction = model.predict(
                     features
                 )
 
-                label = encoder.inverse_transform(
-                    prediction
-                )[0]
+                # =================================================
+                # CONVERT PREDICTION TO LABEL
+                # =================================================
 
-                # -------------------------------------------------
-                # Confidence
-                # -------------------------------------------------
+                label = (
+                    encoder
+                    .inverse_transform(
+                        prediction
+                    )[0]
+                )
+
+                # =================================================
+                # CALCULATE CONFIDENCE
+                # =================================================
+
                 if hasattr(
                     model,
                     "predict_proba"
@@ -338,13 +504,16 @@ def index():
                     )
 
                 else:
+
                     confidence = 0.0
 
-                # -------------------------------------------------
-                # Result
-                # -------------------------------------------------
+                # =================================================
+                # STORE RESULT
+                # =================================================
+
                 result = {
                     "label": str(label),
+
                     "confidence": (
                         f"{confidence:.2f}"
                     ),
@@ -367,6 +536,10 @@ def index():
 
                 error = str(e)
 
+    # =====================================================
+    # RETURN HTML
+    # =====================================================
+
     return render_template(
         "index.html",
         result=result,
@@ -375,50 +548,56 @@ def index():
     )
 
 
-# ---------------------------------------------------------
-# File size error
-# ---------------------------------------------------------
+# =========================================================
+# FILE SIZE ERROR
+# =========================================================
+
 @app.errorhandler(413)
 def too_large(error):
 
     return render_template(
         "index.html",
+
         error=(
             "Image size must be less than 8 MB."
         ),
+
         result=None,
+
         image_url=None,
     ), 413
 
 
-# ---------------------------------------------------------
-# Application startup
-# ---------------------------------------------------------
+# =========================================================
+# APPLICATION STARTUP
+# =========================================================
+
 print(
     "========== APP STARTING =========="
 )
 
-try:
 
-    load_artifacts()
+# IMPORTANT:
+# Do NOT load the model during Vercel build/import.
+#
+# The model is loaded when prediction is requested.
+#
+# This helps avoid unnecessary startup problems.
 
-    print(
-        "========== MODEL READY =========="
-    )
-
-except Exception:
-
-    import traceback
-
-    traceback.print_exc()
+print(
+    "========== APP READY =========="
+)
 
 
-# ---------------------------------------------------------
-# Run Flask locally
-# ---------------------------------------------------------
+# =========================================================
+# LOCAL DEVELOPMENT
+# =========================================================
+
 if __name__ == "__main__":
 
     app.run(
+        host="0.0.0.0",
+        port=5000,
         debug=True
     )
 ```
