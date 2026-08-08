@@ -1,9 +1,8 @@
 Flask
 gunicorn
-joblib
 numpy
 opencv-python-headless
-Pillow
 scikit-image
 scikit-learn
-requests
+joblib
+Pillow
